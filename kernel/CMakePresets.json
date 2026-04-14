@@ -1,0 +1,10 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "riscv64",
+      "binaryDir": "${sourceDir}/build/riscv64",
+      "toolchainFile": "${sourceDir}/../toolchain/riscv64-kernel.cmake"
+    }
+  ]
+}

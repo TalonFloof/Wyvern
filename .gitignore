@@ -36,13 +36,14 @@
 
 .zig-cache
 zig-out
-kobold.iso
+wyvern.iso
 limine-zig/
-kobold.bcfg
+wyvern.bcfg
 
 target/
 Cargo.lock
 out/
+build/
 efi-image
 
 .cutekit
