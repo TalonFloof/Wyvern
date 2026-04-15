@@ -14,9 +14,15 @@
    limitations under the License.
 */
 #pragma once
+#include <stdint.h>
 // Hart Control Block
 
 typedef struct WyvernHCB {
+    // Used for storing some registers temporarily
+    uintptr_t temp_reg1;
+    uintptr_t temp_reg2;
+    void* prev_trap_stack;
+    void* trap_stack;
     int hart_id;
     
 } WyvernHCB;

@@ -13,3 +13,26 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 */
+#include "pfn.h"
+#include "printf.h"
+#include "arch/arch.h"
+#include <stdarg.h>
+
+void early_main(void* fdt, uintptr_t kernel_base) {
+    printf("Copyright (c) 2026\n        Talon Kettuso & Contributors. Licensed under the Apache License 2.0\n        (http://www.apache.org/licenses/LICENSE-2.0)\n");
+    if(fdt) {
+        pfn_init_from_fdt(fdt,kernel_base);
+    }
+}
+
+void panic(const char * msg, ...) {
+    printf("panic: ");
+    va_list args;
+    va_start(args, msg);
+    vprintf(msg, args);
+    va_end(args);
+    printf("\n");
+    arch_mask_ints(false);
+    for(;;)
+        arch_int_wait();
+}

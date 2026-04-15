@@ -15,21 +15,21 @@
 */
 #pragma once
 #include <stdint.h>
-#include <stdbool.h>
-#include "../hcb.h"
 
-struct WyvernRegFrame;
+// Kernel-defined Page Types:
+// "FreePage", "ZeroPage", "ActvPage", "RsvdPage", "WyvnKrnl", "WyvnData", "ObjChain"
+// "PageDir ", "PageTabl", "ThreadCB", "PMemAObj"
+// All types are 8 characters large and are condensed into a 64-bit number.
 
-typedef struct WyvernArchInfo {
-    const char* name;
-    bool is64bit;
-    uint8_t page_levels;
-    uint8_t page_shifts[4];
-} WyvernArchInfo;
+typedef struct WyvernPFNEntry {
+    struct WyvernPFNEntry* prev;
+    struct WyvernPFNEntry* next;
+    union {
+        uint64_t type_num;
+        char type[8];
+    };
+    uintptr_t references;
+    uintptr_t pte;
+} WyvernPFNEntry;
 
-inline WyvernArchInfo* arch_get_info();
-WyvernHCB* arch_get_hcb();
-bool arch_mask_ints(bool enabled);
-void arch_int_wait();
-inline void arch_mmu_switch(void* page_dir);
-void arch_debug_putc(char c);
+void pfn_init_from_fdt(void* fdt, uintptr_t kernel_base);

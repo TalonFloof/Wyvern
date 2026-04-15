@@ -15,21 +15,30 @@
 */
 #pragma once
 #include <stdint.h>
-#include <stdbool.h>
-#include "../hcb.h"
 
-struct WyvernRegFrame;
+// All Device Tree data is stored in big-endian
 
-typedef struct WyvernArchInfo {
-    const char* name;
-    bool is64bit;
-    uint8_t page_levels;
-    uint8_t page_shifts[4];
-} WyvernArchInfo;
+struct fdt_header {
+    uint32_t magic;
+    uint32_t totalsize;
+    uint32_t off_dt_struct;
+    uint32_t off_dt_strings;
+    uint32_t off_mem_rsvmap;
+    uint32_t version;
+    uint32_t last_comp_version;
+    uint32_t boot_cpuid_phys;
+    uint32_t size_dt_strings;
+    uint32_t size_dt_struct;
+};
 
-inline WyvernArchInfo* arch_get_info();
-WyvernHCB* arch_get_hcb();
-bool arch_mask_ints(bool enabled);
-void arch_int_wait();
-inline void arch_mmu_switch(void* page_dir);
-void arch_debug_putc(char c);
+struct fdt_reserve_entry {
+    uint64_t address;
+    uint64_t size;
+};
+
+#define FDT_MAGIC      0xd00dfeed
+#define FDT_BEGIN_NODE 0x00000001
+#define FDT_END_NODE   0x00000002
+#define FDT_PROP       0x00000003
+#define FDT_NOP        0x00000004
+#define FDT_END        0x00000009

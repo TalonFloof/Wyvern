@@ -15,21 +15,6 @@
 */
 #pragma once
 #include <stdint.h>
-#include <stdbool.h>
-#include "../hcb.h"
 
-struct WyvernRegFrame;
-
-typedef struct WyvernArchInfo {
-    const char* name;
-    bool is64bit;
-    uint8_t page_levels;
-    uint8_t page_shifts[4];
-} WyvernArchInfo;
-
-inline WyvernArchInfo* arch_get_info();
-WyvernHCB* arch_get_hcb();
-bool arch_mask_ints(bool enabled);
-void arch_int_wait();
-inline void arch_mmu_switch(void* page_dir);
-void arch_debug_putc(char c);
+void early_main(void* fdt, uintptr_t kernel_base);
+void panic(const char *, ...);

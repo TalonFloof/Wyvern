@@ -18,6 +18,7 @@
 # 
 # Wyvern is REQUIRED to be 2 MB aligned. Since the Linux Boot Protocol also requires this, this isn't a problem.
 .option push
+.option norelax
 .option pic
 .section .text.boot
 .extern _begin, _end
@@ -51,17 +52,7 @@ _entry:
     # We use a Pv39 map to save on memory since we shouldn't need more than 512 GiB of virtual memory
     # Also because not every RISC-V processor supports Pv48 (4-level paging) or higher.
 
-    # 0. Clear the page tables. Junk in the tables is the leading cause of 0xf faults
-    # during the transition to higher-half memory.
-    lla t0, initial_l0_table
-    li  t1, (512 * 8 * 3)     # Total size for L0, L1, and L2 tables
-.clear_tables:
-    sd   zero, 0(t0)
-    addi t0, t0, 8
-    addi t1, t1, -8
-    bnez t1, .clear_tables
-
-    # 1. Identity map first 256 GiB of memory
+    # Identity map first 256 GiB of memory
     lla t0, initial_l2_table
     li t1, 256
     li t2, 0xcf
@@ -78,7 +69,7 @@ _entry:
     or t2, zero, zero
     or t3, zero, zero
 
-    # 2. Map the kernel into the higher half at 0xffffffff80000000
+    # Map the kernel into the higher half at 0xffffffff80000000
     lla s0, _begin
     lla s1, _end
     lla s2, initial_l1_table
@@ -150,19 +141,13 @@ _entry:
     csrw satp, t0
     sfence.vma
 
-    # Set the stack pointer. We must load the virtual address.
-    # Since we are currently in the identity map, 'lla' gives us the 
-    # physical address of the pointer storage.
-    lla t0, stack_ptr     # Physical address of the .quad
-    ld  sp, 0(t0)         # Load the virtual address of boot_stack_top
+    # Set the stack pointer
+    lla t0, stack_ptr
+    ld  sp, 0(t0)
 
     # Initialize Global Pointer (gp) for linker relaxation.
-    # This requires __global_pointer$ to be defined in your linker script.
-.option push
-.option norelax
     lla t0, gp_ptr
     ld  gp, 0(t0)
-.option pop
 
     # Jump to higher-half
     lla t0, jump_addr
@@ -172,9 +157,9 @@ _entry:
 
 bad_alignment_error: .string "wyvern: Kernel is not properly aligned, cannot boot\r\n" # length 53
 .align 3
-.extern wyvern_arch_main
+.extern arch_main
 jump_addr:
-    .quad wyvern_arch_main
+    .quad arch_main
 .option push
 .option norelax
 gp_ptr:
@@ -192,5 +177,6 @@ initial_l1_table:
 initial_l2_table:
     .zero (512 * 8)
 boot_stack:
-    .zero 4096                # 4KB boot stack
+    .zero 16384
+.globl boot_stack_top
 boot_stack_top:

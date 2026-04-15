@@ -2,4 +2,6 @@
 target_sources(wyvern PRIVATE
     arch.c
     boot.S
+    trap.S
+    trap.c
 )

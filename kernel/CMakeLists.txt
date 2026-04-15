@@ -9,6 +9,10 @@ endif()
 # Create the kernel executable with common sources
 add_executable(wyvern 
     main.c
+    pfn.c
+    printf.c
+    slab.c
+    string.c
 )
 
 target_link_options(wyvern PRIVATE 
