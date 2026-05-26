@@ -1,0 +1,6 @@
+(Namespace wyvern
+    ; Called by the VM when we cold boot
+    (DefFn Main ()
+        ()
+    )
+)

@@ -1,0 +1,10 @@
+(Image wyvern
+    (Owns
+        wyvern
+        wyvern.core
+    )
+    (Sources
+        "Init.wyvern"
+        "core/String.wyvern"
+    )
+)
