@@ -1,9 +1,0 @@
-; String Primitive Implementation
-(Namespace wyvern.core
-    (DefObject String
-        (Length :int)
-        (Data :ref)
-    )
-
-    
-)
