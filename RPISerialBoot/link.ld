@@ -1,10 +1,7 @@
 ENTRY(_start)
 
 SECTIONS {
-    /* Bootloader lives at 0x100000, well above the 0x80000
-     * payload load address so we don't clobber ourselves
-     */
-    . = 0x100000;
+    . = 0x08000000;
 
     .text : {
         KEEP(*(.text.boot))     /* start.S entry point must be first */
@@ -32,9 +29,4 @@ SECTIONS {
         . = ALIGN(8);
         __bss_end = .;
     }
-
-    /* Stack grows down from 0x100000 toward lower addresses
-     * payload sits at 0x80000 giving us 512KB of stack space
-     */
-    __stack_top = 0x100000;
 }

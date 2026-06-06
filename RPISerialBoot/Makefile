@@ -1,4 +1,4 @@
-CROSS   = aarch64-elf
+CROSS   = aarch64-none-elf
 CC      = $(CROSS)-gcc
 AS      = $(CROSS)-gcc
 LD      = $(CROSS)-ld
@@ -15,7 +15,7 @@ CFLAGS  = -ffreestanding -nostdlib -nostartfiles \
 
 ASFLAGS = -ffreestanding -nostdlib -nostartfiles
 
-SRCS    = start.S uart.c main.c
+SRCS    = start.S uart.c crc32.c main.c
 OBJS    = $(SRCS:.S=.o)
 OBJS   := $(OBJS:.c=.o)
 

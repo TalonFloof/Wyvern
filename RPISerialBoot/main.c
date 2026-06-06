@@ -1,14 +1,28 @@
 #include <stdint.h>
 #include "uart.h"
+#include "crc32.h"
 
-/* The Raspberry Pi actually normally loads kernel8.bin in this position
- * We want the bootloader to be position independent so the kernel doesn't have to relocate itself
- */
 #define LOAD_ADDR ((uint8_t *)0x80000)
 
-#define READY_BYTE  0x03
-#define ACK_O       0x4F /* 'O' */
-#define ACK_K       0x4B /* 'K' */
+#define READY_BYTE      0x03
+#define ACK_O           0x4F
+#define ACK_K           0x4B
+#define ACK             0x06
+#define NAK             0x15
+#define GO_G            0x47
+#define GO_O            0x4F
+
+#define CHUNK_SIZE      512
+#define MAX_RETRIES     3
+
+#define HART_MAILBOXES  ((volatile uint64_t *)0x1000)
+
+static void wake_harts(void *entry) {
+    HART_MAILBOXES[1] = (uint64_t)entry;  // hart 1
+    HART_MAILBOXES[2] = (uint64_t)entry;  // hart 2
+    HART_MAILBOXES[3] = (uint64_t)entry;  // hart 3
+    asm volatile("sev");
+}
 
 static uint32_t uart_get32(void) {
     uint32_t val = 0;
@@ -27,66 +41,93 @@ static void uart_flush_rx(void) {
     }
 }
 
-static void receive_payload(void) {
+static int receive_chunk(uint8_t *dst, uint16_t size) {
+    // Receive chunk data
+    for (uint16_t i = 0; i < size; i++) {
+        dst[i] = (uint8_t)uart_getc();
+    }
+
+    // Receive CRC32
+    uint32_t received_crc = uart_get32();
+    uint32_t computed_crc = crc32(dst, size);
+
+    if (computed_crc != received_crc) {
+        uart_putc(NAK);
+        return 0;
+    }
+
+    uart_putc(ACK);
+    return 1;
+}
+
+static void receive_payload(uint64_t dtb) {
     uint32_t size;
     uint8_t *dst = LOAD_ADDR;
 
     while (1) {
         uart_flush_rx();
 
-        // Send ready signal
         uart_putc(READY_BYTE);
         uart_putc(READY_BYTE);
         uart_putc(READY_BYTE);
 
-        // Wait for a response with timeout
-        // At 115200 baud, one byte takes ~87us
-        // We'll wait ~3 seconds worth of iterations
         volatile uint32_t timeout = 3000000;
-        while (timeout > 0 && !(*UART0_FR & FR_RXFE)) {
+        while (timeout > 0 && (*UART0_FR & FR_RXFE)) {
             timeout--;
         }
 
-        // Nothing came in, retry
-        if (timeout == 0) {
+        if (timeout == 0) continue;
+
+        size = uart_get32();
+
+        if (size == 0 || size > 0x7F80000) {
+            uart_puts("error: bad size\r\n");
             continue;
         }
 
-        // Got something — read the 4 byte size
-        size = uart_get32();
-
-        // Validate size
-        if (size == 0 || size > 0x2000000) {
-            uart_puts("error: bad size\r\n");
-            continue;    // retry instead of return
-        }
-
-        // Valid size received, break out
         break;
     }
 
-    /* Acknowledge size with "OK" */
     uart_putc(ACK_O);
     uart_putc(ACK_K);
 
-    /* Receive payload bytes */
-    for (uint32_t i = 0; i < size; i++) {
-        dst[i] = (uint8_t)uart_getc();
+    uint32_t received = 0;
+    while (received < size) {
+        // Compute this chunk's size
+        uint32_t remaining = size - received;
+        uint16_t chunk_size = remaining > CHUNK_SIZE ? CHUNK_SIZE : (uint16_t)remaining;
+
+        // Attempt chunk with retries
+        int success = 0;
+        for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            if (receive_chunk(dst + received, chunk_size)) {
+                success = 1;
+                break;
+            }
+            // NAK already sent by receive_chunk, host will retransmit
+        }
+
+        if (!success) {
+            uart_puts("error: max retries exceeded\r\n");
+            return;  // back to ready loop
+        }
+
+        received += chunk_size;
     }
 
-    uart_puts("info: payload transfer finished, jumping to kernel\r\n");
+    uart_putc(GO_G);
+    uart_putc(GO_O);
+    uart_puts("info: Transfer OK, jumping to payload\r\n");
 
-    /* Clean up UART — drain TX FIFO before jumping */
     for (volatile int i = 0; i < 10000; i++);
 
-    /* Cast load address to a function pointer and jump
-     * This transfers control to the received payload
-     */
-    void (*payload)(void) = (void (*)(void))LOAD_ADDR;
-    payload();
+    wake_harts(LOAD_ADDR);
+
+    void (*payload)(uint64_t, uint64_t, uint64_t, uint64_t) = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))LOAD_ADDR;
+    payload(dtb, 0, 0, 0);
 }
 
-void main(void) {
+void main(uint64_t dtb) {
     uart_init();
     uart_puts("info: Wyvern Serial Bootloader for rpi3\r\n");
 
@@ -94,6 +135,6 @@ void main(void) {
      * wait for next upload rather than hanging
      */
     while (1) {
-        receive_payload();
+        receive_payload(dtb);
     }
 }

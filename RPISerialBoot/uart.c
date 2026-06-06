@@ -33,10 +33,6 @@ void uart_init(void) {
 
     // Set baud rate to 115200
     // PL011 baud rate divisor = UART clock / (16 * baud rate)
-    // UART clock is 48MHz by default on BCM2837
-    // 48000000 / (16 * 115200) = 26.041...
-    // Integer part = 26
-    // Fractional part = 0.041 * 64 = 2.604 → round to 3
     *UART0_IBRD = 26;
     *UART0_FBRD = 3;
 
