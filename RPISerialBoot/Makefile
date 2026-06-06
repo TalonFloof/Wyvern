@@ -1,4 +1,4 @@
-CROSS   = aarch64-none-elf
+CROSS   = aarch64-elf
 CC      = $(CROSS)-gcc
 AS      = $(CROSS)-gcc
 LD      = $(CROSS)-ld

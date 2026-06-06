@@ -4,7 +4,7 @@
 /* The Raspberry Pi actually normally loads kernel8.bin in this position
  * We want the bootloader to be position independent so the kernel doesn't have to relocate itself
  */
-#define LOAD_ADDR ((uint8_t *)0x100000)
+#define LOAD_ADDR ((uint8_t *)0x80000)
 
 #define READY_BYTE  0x03
 #define ACK_O       0x4F /* 'O' */
@@ -20,26 +20,49 @@ static uint32_t uart_get32(void) {
     return val;
 }
 
+static void uart_flush_rx(void) {
+    // Drain any bytes sitting in the RX FIFO
+    while (!(*UART0_FR & FR_RXFE)) {
+        (void)*UART0_DR;    // read and discard
+    }
+}
+
 static void receive_payload(void) {
     uint32_t size;
     uint8_t *dst = LOAD_ADDR;
 
-    /* Signal ready to host — send three 0x03 bytes
-     * Host waits for this before sending anything
-     */
-    uart_putc(READY_BYTE);
-    uart_putc(READY_BYTE);
-    uart_putc(READY_BYTE);
+    while (1) {
+        uart_flush_rx();
 
-    /* Receive payload size (4 bytes, little-endian) */
-    size = uart_get32();
+        // Send ready signal
+        uart_putc(READY_BYTE);
+        uart_putc(READY_BYTE);
+        uart_putc(READY_BYTE);
 
-    /* Sanity check — reject obviously bad sizes
-     * Max we'll accept is 32MB which is more than enough
-     */
-    if (size == 0 || size > 0x2000000) {
-        uart_puts("error: bad size\r\n");
-        return;
+        // Wait for a response with timeout
+        // At 115200 baud, one byte takes ~87us
+        // We'll wait ~3 seconds worth of iterations
+        volatile uint32_t timeout = 3000000;
+        while (timeout > 0 && !(*UART0_FR & FR_RXFE)) {
+            timeout--;
+        }
+
+        // Nothing came in, retry
+        if (timeout == 0) {
+            continue;
+        }
+
+        // Got something — read the 4 byte size
+        size = uart_get32();
+
+        // Validate size
+        if (size == 0 || size > 0x2000000) {
+            uart_puts("error: bad size\r\n");
+            continue;    // retry instead of return
+        }
+
+        // Valid size received, break out
+        break;
     }
 
     /* Acknowledge size with "OK" */
