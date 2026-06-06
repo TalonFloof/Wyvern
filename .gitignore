@@ -1,1 +1,3 @@
-WyvernCompiler/WyvernCompiler
+*.o
+*.elf
+*.img

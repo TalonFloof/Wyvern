@@ -28,7 +28,7 @@ all: kernel8.img
 	$(CC) $(CFLAGS) -c $< -o $@
 
 kernel8.elf: $(OBJS)
-	$(LD) -T link.ld -o $@ $(OBJS)
+	$(LD) -nostdlib -T link.ld -o $@ $(OBJS)
 
 kernel8.img: kernel8.elf
 	$(OBJCOPY) -O binary $< $@

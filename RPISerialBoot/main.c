@@ -4,7 +4,7 @@
 /* The Raspberry Pi actually normally loads kernel8.bin in this position
  * We want the bootloader to be position independent so the kernel doesn't have to relocate itself
  */
-#define LOAD_ADDR ((uint8_t *)0x80000)
+#define LOAD_ADDR ((uint8_t *)0x100000)
 
 #define READY_BYTE  0x03
 #define ACK_O       0x4F /* 'O' */
@@ -63,7 +63,7 @@ static void receive_payload(void) {
     payload();
 }
 
-void bootloader_main(void) {
+void main(void) {
     uart_init();
     uart_puts("info: Wyvern Serial Bootloader for rpi3\r\n");
 

@@ -4,7 +4,7 @@ SECTIONS {
     /* Bootloader lives at 0x100000, well above the 0x80000
      * payload load address so we don't clobber ourselves
      */
-    . = 0x100000;
+    . = 0x80000;
 
     .text : {
         KEEP(*(.text.boot))     /* start.S entry point must be first */
