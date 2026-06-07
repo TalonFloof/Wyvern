@@ -1,5 +1,6 @@
 #ifndef _UART_H
 #define _UART_H
+#include <stdint.h>
 
 #define MMIO_BASE       0x3F000000
 
@@ -25,5 +26,6 @@
 void uart_init(void);
 void uart_putc(char c);
 char uart_getc(void);
+int uart_getc_timeout(uint32_t timeout_ms);
 void uart_puts(const char *s);
 #endif

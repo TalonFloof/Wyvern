@@ -41,90 +41,150 @@ static void uart_flush_rx(void) {
     }
 }
 
-static int receive_chunk(uint8_t *dst, uint16_t size) {
-    // Receive chunk data
+static int receive_chunk(uint8_t *dst, uint16_t size, uint32_t chunk_num) {
+    // Receive chunk data with timeout
     for (uint16_t i = 0; i < size; i++) {
-        dst[i] = (uint8_t)uart_getc();
+        int b = uart_getc_timeout(1000);
+        if (b < 0) return -1;
+        dst[i] = (uint8_t)b;
     }
 
-    // Receive CRC32
-    uint32_t received_crc = uart_get32();
-    uint32_t computed_crc = crc32(dst, size);
+    // Receive CRC32 with timeout
+    uint32_t received_crc = 0;
+    for (int i = 0; i < 4; i++) {
+        int b = uart_getc_timeout(1000);
+        if (b < 0) return -1;
+        received_crc |= (uint32_t)b << (i * 8);
+    }
 
+    uint32_t computed_crc = crc32(dst, size);
     if (computed_crc != received_crc) {
+        // NAK with chunk number so host knows which chunk to retransmit
+        uart_flush_rx();
         uart_putc(NAK);
+        uart_putc((chunk_num)       & 0xFF);
+        uart_putc((chunk_num >> 8)  & 0xFF);
+        uart_putc((chunk_num >> 16) & 0xFF);
+        uart_putc((chunk_num >> 24) & 0xFF);
         return 0;
     }
 
+    // ACK with chunk number so host can track progress
     uart_putc(ACK);
+    uart_putc((chunk_num)       & 0xFF);
+    uart_putc((chunk_num >> 8)  & 0xFF);
+    uart_putc((chunk_num >> 16) & 0xFF);
+    uart_putc((chunk_num >> 24) & 0xFF);
     return 1;
 }
 
 static void receive_payload(uint64_t dtb) {
-    uint32_t size;
     uint8_t *dst = LOAD_ADDR;
+    static uint32_t total_size = 0;
+    static uint32_t last_good_chunk = 0;
+    static int resuming = 0;
 
     while (1) {
         uart_flush_rx();
 
-        uart_putc(READY_BYTE);
-        uart_putc(READY_BYTE);
-        uart_putc(READY_BYTE);
+        if (!resuming) {
+            uart_putc(READY_BYTE);
+            uart_putc(READY_BYTE);
+            uart_putc(READY_BYTE);
+        } else {
+            uart_putc('R');
+            uart_putc('E');
+            uart_putc('S');
+            uart_putc((last_good_chunk)       & 0xFF);
+            uart_putc((last_good_chunk >> 8)  & 0xFF);
+            uart_putc((last_good_chunk >> 16) & 0xFF);
+            uart_putc((last_good_chunk >> 24) & 0xFF);
+        }
 
         volatile uint32_t timeout = 3000000;
-        while (timeout > 0 && (*UART0_FR & FR_RXFE)) {
+        while (timeout > 0 && (*UART0_FR & FR_RXFE))
             timeout--;
-        }
 
         if (timeout == 0) continue;
 
-        size = uart_get32();
-
-        if (size == 0 || size > 0x7F80000) {
-            uart_puts("error: bad size\r\n");
-            continue;
+        if (!resuming) {
+            total_size = uart_get32();
+            if (total_size == 0 || total_size > 0x7F80000) {
+                uart_puts("error: bad size\r\n");
+                continue;
+            }
+            uart_putc(ACK_O);
+            uart_putc(ACK_K);
+            last_good_chunk = 0;
+        } else {
+            int r1 = uart_getc_timeout(1000);
+            if (r1 != 'O') continue;
+            int r2 = uart_getc_timeout(1000);
+            if (r2 != 'K') continue;
         }
-
         break;
     }
 
-    uart_putc(ACK_O);
-    uart_putc(ACK_K);
+    uint32_t received = resuming ?
+        (uint32_t)(last_good_chunk + 1) * CHUNK_SIZE : 0;
+    if (received > total_size) received = total_size;
+    uint32_t chunk_num = resuming ? (last_good_chunk + 1) : 0;
+    resuming = 0;
 
-    uint32_t received = 0;
-    while (received < size) {
-        // Compute this chunk's size
-        uint32_t remaining = size - received;
-        uint16_t chunk_size = remaining > CHUNK_SIZE ? CHUNK_SIZE : (uint16_t)remaining;
+    while (received < total_size) {
+        uint32_t remaining = total_size - received;
+        uint16_t chunk_size = remaining > CHUNK_SIZE ?
+                              CHUNK_SIZE : (uint16_t)remaining;
 
-        // Attempt chunk with retries
         int success = 0;
         for (int attempt = 0; attempt < MAX_RETRIES; attempt++) {
-            if (receive_chunk(dst + received, chunk_size)) {
+            int result = receive_chunk(dst + received,
+                                       chunk_size, chunk_num);
+            if (result == 1) {
+                last_good_chunk = chunk_num;
                 success = 1;
                 break;
+            } else if (result == 0) {
+                continue;   // NAK already sent
+            } else {
+                // Connection lost
+                resuming = 1;
+                for (volatile int i = 0; i < 100000; i++);
+                uart_flush_rx();
+                goto retry;
             }
-            // NAK already sent by receive_chunk, host will retransmit
         }
 
         if (!success) {
-            uart_puts("error: max retries exceeded\r\n");
-            return;  // back to ready loop
+            // Reset static state for next call
+            resuming = 0;
+            last_good_chunk = 0;
+            total_size = 0;
+            return;
         }
 
         received += chunk_size;
+        chunk_num++;
     }
+
+    // Success — reset static state before jumping
+    resuming = 0;
+    last_good_chunk = 0;
+    total_size = 0;
 
     uart_putc(GO_G);
     uart_putc(GO_O);
-    uart_puts("info: Transfer OK, jumping to payload\r\n");
-
+    uart_puts("info: transfer complete, CRC32 OK\r\n");
     for (volatile int i = 0; i < 10000; i++);
 
     wake_harts(LOAD_ADDR);
-
-    void (*payload)(uint64_t, uint64_t, uint64_t, uint64_t) = (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))LOAD_ADDR;
+    void (*payload)(uint64_t, uint64_t, uint64_t, uint64_t) =
+        (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))LOAD_ADDR;
     payload(dtb, 0, 0, 0);
+    return;
+
+retry:
+    receive_payload(dtb);
 }
 
 void main(uint64_t dtb) {

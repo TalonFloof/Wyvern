@@ -59,6 +59,16 @@ char uart_getc(void) {
     return (char)(*UART0_DR & 0xFF);
 }
 
+int uart_getc_timeout(uint32_t timeout_ms) {
+    volatile uint32_t count = timeout_ms * 10000;
+    while (count > 0) {
+        if (!(*UART0_FR & FR_RXFE))
+            return (int)(*UART0_DR & 0xFF);
+        count--;
+    }
+    return -1;
+}
+
 void uart_puts(const char *s) {
     while (*s) {
         if (*s == '\n') uart_putc('\r');

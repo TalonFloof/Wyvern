@@ -67,22 +67,68 @@ def send_chunk(ser, chunk, chunk_num, total_chunks):
         ser.write(chunk)
         ser.write(struct.pack('<I', crc32(chunk)))
 
+        # Read response byte + 4 byte chunk number
         response = ser.read(1)
         if not response:
             print(f"\nTimeout on chunk {chunk_num}/{total_chunks}")
             continue
+
+        # Read echoed chunk number
+        num_bytes = ser.read(4)
+        if len(num_bytes) < 4:
+            print(f"\nTimeout reading chunk number echo")
+            continue
+
+        echoed_num = struct.unpack('<I', num_bytes)[0]
+
+        # Verify the echoed chunk number matches what we sent
+        if echoed_num != chunk_num:
+            print(f"\nChunk number mismatch: sent {chunk_num} "
+                  f"got {echoed_num}")
+            continue
+
         if response[0] == ACK:
             return True
         elif response[0] == NAK:
             print(f"\nNAK on chunk {chunk_num}/{total_chunks}, "
                   f"retrying (attempt {attempt + 1}/{MAX_RETRIES})")
             continue
-        else:
-            print(f"\nUnexpected response: {hex(response[0])}")
-            continue
 
     print(f"\nMax retries exceeded on chunk {chunk_num}/{total_chunks}")
     return False
+
+def wait_for_resume(ser, total_chunks):
+    """Wait for Pi resume signal, return next chunk index to send."""
+    import time
+    time.sleep(0.5)          # let line settle
+    ser.reset_input_buffer() # flush stale bytes
+
+    print("\nWaiting for resume signal...")
+    buf = bytearray()
+
+    while True:
+        b = ser.read(1)
+        if not b:
+            print("Timeout waiting for resume signal")
+            sys.exit(1)
+        buf.append(b[0])
+
+        # Look for RES marker in last 3 bytes
+        if len(buf) >= 3 and buf[-3:] == bytearray(b'RES'):
+            # Read 32-bit chunk number
+            chunk_bytes = ser.read(4)
+            if len(chunk_bytes) < 4:
+                print("Timeout reading resume chunk number")
+                sys.exit(1)
+            last_good = struct.unpack('<I', chunk_bytes)[0]
+            next_chunk = last_good + 1
+            print(f"Resuming from chunk {next_chunk}/{total_chunks}")
+            ser.write(b'OK')
+            return next_chunk
+
+        # Keep buffer from growing indefinitely
+        if len(buf) > 16:
+            buf = buf[-16:]
 
 def send_kernel(port, kernel_path):
     with open(kernel_path, 'rb') as f:
@@ -93,65 +139,91 @@ def send_kernel(port, kernel_path):
               for i in range(0, size, CHUNK_SIZE)]
     total_chunks = len(chunks)
 
-    print(f"Sending {kernel_path} ({size} bytes, "
-          f"{total_chunks} chunks of {CHUNK_SIZE} bytes)")
+    print(f"Sending {kernel_path} ({size} bytes, {total_chunks} chunks)")
 
     ser = serial.Serial()
-    ser.port = PORT
+    ser.port = port
     ser.baudrate = BAUD
     ser.timeout = 10
+    ser.dtr = False
     ser.rts = False
-    ser.dtr = False        # prevent reset before opening
     ser.open()
 
     import time
-    time.sleep(2)
+    time.sleep(2.0)
     ser.reset_input_buffer()
     ser.reset_output_buffer()
 
-    print("Waiting for bootloader ready signal...")
+    start_chunk = 0
 
-    ready_count = 0
-    while ready_count < 3:
-        byte = ser.read(1)
-        if not byte:
-            print("Timeout waiting for ready signal")
-            sys.exit(1)
-        if byte[0] == READY_BYTE:
-            ready_count += 1
-        else:
-            ready_count = 0
+    # Handshake loop — handles both fresh start and resume
+    print("Waiting for signal...")
+    while True:
+        signal = []
+        while len(signal) < 3:
+            b = ser.read(1)
+            if not b:
+                print("Timeout waiting for signal")
+                sys.exit(1)
+            signal.append(b[0])
+            if len(signal) > 3:
+                signal.pop(0)
 
-    print("Bootloader ready, sending size...")
-    ser.write(struct.pack('<I', size))
+        if signal == [ord('R'), ord('E'), ord('S')]:
+            # Resume signal — read 32-bit last good chunk number
+            chunk_bytes = ser.read(4)
+            if len(chunk_bytes) < 4:
+                print("Timeout reading resume chunk number")
+                sys.exit(1)
+            last_good = struct.unpack('<I', chunk_bytes)[0]
+            start_chunk = last_good + 1
+            print(f"\nResume requested from chunk "
+                  f"{start_chunk}/{total_chunks}")
+            ser.write(b'OK')
+            break
 
-    ack = ser.read(2)
-    if ack != b'OK':
-        print(f"Bad ACK: {ack!r}")
-        sys.exit(1)
+        elif all(b == READY_BYTE for b in signal):
+            # Fresh transfer
+            print("Bootloader ready, sending size...")
+            ser.write(struct.pack('<I', size))
 
-    print("Size acknowledged, sending chunks...")
+            ack = ser.read(2)
+            if ack != b'OK':
+                print(f"Bad ACK: {ack!r}")
+                sys.exit(1)
+            start_chunk = 0
+            break
 
-    for i, chunk in enumerate(chunks):
-        chunk_num = i + 1
-        percent = (chunk_num / total_chunks) * 100
-        print(f"\r  Chunk {chunk_num}/{total_chunks} "
-                f"({len(chunk)} bytes) {percent:.1f}%", end='', flush=True)
+    # Send chunks using send_chunk
+    print(f"Sending from chunk {start_chunk}/{total_chunks}...")
 
-        if not send_chunk(ser, chunk, chunk_num, total_chunks):
-            print("\nTransfer failed")
-            sys.exit(1)
+    i = start_chunk
+    while i < total_chunks:
+        chunk = chunks[i]
+        percent = ((i + 1) / total_chunks) * 100
+        print(f"\r  Chunk {i + 1}/{total_chunks} "
+              f"({len(chunk)} bytes) {percent:.1f}%", end='', flush=True)
 
-    print("\nAll chunks received!")
+        try:
+            if send_chunk(ser, chunk, i, total_chunks):
+                i += 1
+            else:
+                i = wait_for_resume(ser, total_chunks)
+        except serial.SerialException:
+            print(f"\nConnection lost on chunk {i + 1}, "
+                  f"waiting for resume signal...")
+            i = wait_for_resume(ser, total_chunks)
 
-    # Wait for GO
+    print("\nAll chunks sent!")
+
     response = ser.read(2)
     if response == b'GO':
-        print("Bootloader confirmed, entering terminal mode...")
+        print("Transfer complete, entering terminal mode...")
     else:
-        print(f"Unexpected final response: {response!r}")
+        print(f"Unexpected response: {response!r}")
         sys.exit(1)
 
+    import time
     time.sleep(0.5)
     while ser.in_waiting:
         sys.stdout.buffer.write(ser.read(ser.in_waiting))
