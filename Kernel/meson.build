@@ -11,8 +11,6 @@ project('wyvern', 'c',
 platform = get_option('platform')
 cpu = target_machine.cpu_family()
 
-# Derive the arch-level HAL directory from the cross file's cpu_family.
-# Add a branch here when porting to a new architecture.
 if cpu == 'riscv64'
   hal = 'RiscV64'
 elif cpu == 'aarch64'
@@ -23,7 +21,6 @@ else
   error('Unsupported cpu_family: ' + cpu)
 endif
 
-# Validate that the chosen platform belongs to this architecture.
 riscv64_platforms = ['QEMU', 'VisionFive2']
 aarch64_platforms = ['Broadcom2837']
 x86_64_platforms  = ['NewWorldPC']
@@ -70,23 +67,23 @@ kernel_link_args = [
   '-nostdlib',
   '-nostartfiles',
   '-static',
-  # '-T', meson.current_source_dir() / 'Core/HAL' / hal / 'Platform' / platform / 'linker.ld',
+  '-T', meson.current_source_dir() / 'Core/HAL' / hal / 'Platform' / platform / 'link.ld',
 ]
 
 kernel_inc = [
   include_directories('.'),
   include_directories('Core'),
-  include_directories('Core/HAL'),                                   # hal.h
-  include_directories('Core/HAL' / hal),                            # arch-level headers
-  include_directories('Core/HAL' / hal / 'Platform' / platform),   # platform headers
+  include_directories('Core/HAL'),
+  include_directories('Core/HAL' / hal),
+  include_directories('Core/HAL' / hal / 'Platform' / platform),
 ]
 
 ss = import('sourceset')
 kernel_ss = ss.source_set()
 
-subdir('Core')                                           # main.c
-subdir('Core/HAL' / hal)                               # arch-level: shared across all boards on this arch
-subdir('Core/HAL' / hal / 'Platform' / platform)      # platform-level: board-specific code
+subdir('Core')
+subdir('Core/HAL' / hal) 
+subdir('Core/HAL' / hal / 'Platform' / platform)
 
 kernel_result = kernel_ss.apply({})
 

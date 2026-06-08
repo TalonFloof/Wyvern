@@ -17,36 +17,36 @@ static inline uint64_t read_sctlr_el1(void) {
     return val;
 }
 
-#define SCTLR_M         (1UL << 0)   // MMU enable
-#define SCTLR_A         (1UL << 1)   // Alignment fault enable
-#define SCTLR_C         (1UL << 2)   // Data cache enable
-#define SCTLR_SA        (1UL << 3)   // Stack alignment check EL1
-#define SCTLR_SA0       (1UL << 4)   // Stack alignment check EL0
-#define SCTLR_I         (1UL << 12)  // Instruction cache enable
-#define SCTLR_WXN       (1UL << 19)  // Write implies execute never
-#define SCTLR_SPAN      (1UL << 23)  // Set privileged access never
-#define SCTLR_EIS       (1UL << 22)  // Exception entry is context synchronizing
-#define SCTLR_EOS       (1UL << 11)  // Exception exit is context synchronizing
+#define SCTLR_M         (1UL << 0)   /* MMU enable */
+#define SCTLR_A         (1UL << 1)   /* Alignment fault enable */
+#define SCTLR_C         (1UL << 2)   /* Data cache enable */
+#define SCTLR_SA        (1UL << 3)   /* Stack alignment check EL1 */
+#define SCTLR_SA0       (1UL << 4)   /* Stack alignment check EL0 */
+#define SCTLR_I         (1UL << 12)  /* Instruction cache enable */
+#define SCTLR_WXN       (1UL << 19)  /* Write implies execute never */
+#define SCTLR_SPAN      (1UL << 23)  /* Set privileged access never */
+#define SCTLR_EIS       (1UL << 22)  /* Exception entry is context synchronizing */
+#define SCTLR_EOS       (1UL << 11)  /* Exception exit is context synchronizing */
 
-#define HCR_RW          (1UL << 31)  // EL1 is AArch64
+#define HCR_RW          (1UL << 31)  /* EL1 is AArch64 */
 
-#define SCR_NS          (1UL << 0)   // Non-secure
-#define SCR_RW          (1UL << 10)  // EL2 is AArch64
+#define SCR_NS          (1UL << 0)   /* Non-secure */
+#define SCR_RW          (1UL << 10)  /* EL2 is AArch64 */
 
-#define SPSR_EL1H       0x5          // EL1h — EL1 with SP_EL1
-#define SPSR_EL2H       0x9          // EL2h — EL2 with SP_EL2
-#define SPSR_DAIF_MASK  (0xF << 6)   // Mask D, A, I, F
+#define SPSR_EL1H       0x5          /* EL1h — EL1 with SP_EL1 */
+#define SPSR_EL2H       0x9          /* EL2h — EL2 with SP_EL2 */
+#define SPSR_DAIF_MASK  (0xF << 6)   /* Mask D, A, I, F */
 
 static void hal_drop_to_el1() {
     uint64_t el = read_currentel();
 
     if (el == 1) {
-        // Already in EL1 — nothing to do
+        /* Already in EL1 */
         return;
     }
 
     if (el == 3) {
-        // Drop from EL3 to EL2 before we drop to EL1
+        /* Drop from EL3 to EL2 before we drop to EL1 */
         uint64_t scr = SCR_NS | SCR_RW;
         asm volatile("msr scr_el3, %0" :: "r"(scr));
 
@@ -83,7 +83,7 @@ static void hal_drop_to_el1() {
 }
 
 void hal_early_init(void *dtb) {
-    (void)dtb;  // TODO: Use Device Tree
+    (void)dtb;  /* TODO: Use Device Tree */
 
     hal_drop_to_el1();
 
@@ -113,30 +113,23 @@ void hal_early_init(void *dtb) {
 
 }
 
-void hal_irq_enable_disable(int enable) {
-    asm volatile("msr daifclr, #0xF\n isb");
+int hal_irq_enable_disable(int enable) {
+    int old;
+    asm volatile("mrs %0, daif" : "=r"(old));
+    if(!enable && !old) {
+        asm volatile("msr daifset, #0xF\n isb");
+    } else if(enable && old) {
+        asm volatile("msr daifclr, #0xF\n isb");
+    }
+    return old;
 }
 
-void hal_irq_disable(void) {
-    asm volatile("msr daifset, #0xF\n isb");
-}
+void hal_fence() { asm volatile("dmb sy"  ::: "memory"); }
 
-void hal_dsb() {
-    asm volatile("dsb sy" ::: "memory");
-}
+void hal_write_fence() { asm volatile("dmb st" ::: "memory"); }
 
-void hal_dmb() {
-    asm volatile("dmb sy" ::: "memory");
-}
+void hal_read_fence() { asm volatile("dmb ld" ::: "memory"); }
 
-void hal_isb() {
-    asm volatile("isb");
-}
+void hal_sync_fence() { asm volatile("dsb sy"  ::: "memory"); }
 
-void hal_icache_invalidate() {
-    asm volatile(
-        "ic ialluis\n"
-        "dsb ish\n"
-        "isb\n"
-    );
-}
+void hal_inst_fence() { asm volatile("isb" ::: "memory"); }
