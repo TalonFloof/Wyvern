@@ -2,3 +2,4 @@
 *.elf
 *.img
 .DS_Store
+build/

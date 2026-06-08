@@ -1,5 +1,4 @@
-# x86_64 PC HAL
-# Add source files here as you create them, e.g.:
+# x86_64 New World PC HAL
 # kernel_ss.add(files(
 #   'init.c',
 #   'uart.c',

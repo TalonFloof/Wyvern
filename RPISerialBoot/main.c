@@ -24,14 +24,17 @@ static void wake_harts(void *entry) {
     asm volatile("sev");
 }
 
-static uint32_t uart_get32(void) {
+/* Receive 4 bytes little-endian with per-byte timeout.
+ * Returns 0 on success, -1 on timeout. */
+static int uart_get32(uint32_t *out) {
     uint32_t val = 0;
-    /* Receive 4 bytes little-endian */
-    val  = (uint32_t)uart_getc();
-    val |= (uint32_t)uart_getc() << 8;
-    val |= (uint32_t)uart_getc() << 16;
-    val |= (uint32_t)uart_getc() << 24;
-    return val;
+    for (int i = 0; i < 4; i++) {
+        int b = uart_getc_timeout(1000);
+        if (b < 0) return -1;
+        val |= (uint32_t)b << (i * 8);
+    }
+    *out = val;
+    return 0;
 }
 
 static void uart_flush_rx(void) {
@@ -60,7 +63,6 @@ static int receive_chunk(uint8_t *dst, uint16_t size, uint32_t chunk_num) {
     uint32_t computed_crc = crc32(dst, size);
     if (computed_crc != received_crc) {
         // NAK with chunk number so host knows which chunk to retransmit
-        uart_flush_rx();
         uart_putc(NAK);
         uart_putc((chunk_num)       & 0xFF);
         uart_putc((chunk_num >> 8)  & 0xFF);
@@ -84,6 +86,9 @@ static void receive_payload(uint64_t dtb) {
     static uint32_t last_good_chunk = 0;
     static int resuming = 0;
 
+    /* Jump target for resume after connection loss.  Using goto keeps this
+     * iterative — no recursive calls, no unbounded stack growth. */
+restart:
     while (1) {
         uart_flush_rx();
 
@@ -108,23 +113,38 @@ static void receive_payload(uint64_t dtb) {
         if (timeout == 0) continue;
 
         if (!resuming) {
-            total_size = uart_get32();
+            if (uart_get32(&total_size) < 0) continue;
             if (total_size == 0 || total_size > 0x7F80000) {
                 uart_puts("error: bad size\r\n");
                 continue;
             }
             uart_putc(ACK_O);
             uart_putc(ACK_K);
-            last_good_chunk = 0;
+            last_good_chunk = UINT32_MAX; /* sentinel: no chunks received yet */
         } else {
             int r1 = uart_getc_timeout(1000);
             if (r1 != 'O') continue;
             int r2 = uart_getc_timeout(1000);
             if (r2 != 'K') continue;
+            /* Verify Python echoes back the correct chunk number.
+             * This prevents a stray 'O'+'K' sequence in binary chunk
+             * data from causing a false handshake completion. */
+            uint32_t echo;
+            if (uart_get32(&echo) < 0 || echo != last_good_chunk) continue;
+            /* Drain any stale in-flight bytes from Python's failed
+             * send attempts that arrived during the handshake, then
+             * signal Python that we are ready to receive chunk data. */
+            uart_flush_rx();
+            uart_putc(ACK);
         }
         break;
     }
 
+    /* When resuming, last_good_chunk is the 0-based index of the last
+     * fully ACK'd chunk (never UINT32_MAX here because we only set
+     * resuming=1 after at least one chunk succeeds).  Every chunk before
+     * the last is exactly CHUNK_SIZE bytes, so the byte offset is
+     * (last_good_chunk + 1) * CHUNK_SIZE — no off-by-one. */
     uint32_t received = resuming ?
         (uint32_t)(last_good_chunk + 1) * CHUNK_SIZE : 0;
     if (received > total_size) received = total_size;
@@ -147,16 +167,23 @@ static void receive_payload(uint64_t dtb) {
             } else if (result == 0) {
                 continue;   // NAK already sent
             } else {
-                // Connection lost
-                resuming = 1;
+                // Connection lost — go back to handshake iteratively
+                if (last_good_chunk == UINT32_MAX) {
+                    /* Lost before chunk 0 was ever ACK'd: do a clean
+                     * fresh start so we don't skip chunk 0 and silently
+                     * corrupt the payload. */
+                    resuming = 0;
+                    total_size = 0;
+                } else {
+                    resuming = 1;
+                }
                 for (volatile int i = 0; i < 100000; i++);
-                uart_flush_rx();
-                goto retry;
+                goto restart;
             }
         }
 
         if (!success) {
-            // Reset static state for next call
+            // NAK exhaustion — reset static state for next call
             resuming = 0;
             last_good_chunk = 0;
             total_size = 0;
@@ -174,17 +201,13 @@ static void receive_payload(uint64_t dtb) {
 
     uart_putc(GO_G);
     uart_putc(GO_O);
-    uart_puts("info: transfer complete, CRC32 OK\r\n");
     for (volatile int i = 0; i < 10000; i++);
+    uart_puts("info: transfer complete, CRC32 OK\r\n");
 
     wake_harts(LOAD_ADDR);
     void (*payload)(uint64_t, uint64_t, uint64_t, uint64_t) =
         (void (*)(uint64_t, uint64_t, uint64_t, uint64_t))LOAD_ADDR;
     payload(dtb, 0, 0, 0);
-    return;
-
-retry:
-    receive_payload(dtb);
 }
 
 void main(uint64_t dtb) {
