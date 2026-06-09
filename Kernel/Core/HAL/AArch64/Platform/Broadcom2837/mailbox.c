@@ -9,11 +9,11 @@ int mbox_call(volatile uint32_t *buf) {
     
     hal_sync_fence(); /* Fence to ensure the data is actually written */
     
-    // Wait until mailbox not full
+    /* Wait until mailbox not full */
     while (MBOX_STATUS & MBOX_FULL);
     MBOX_WRITE = msg;
     
-    // Wait for response on our channel
+    /* Wait for response on our channel */
     while (1) {
         while (MBOX_STATUS & MBOX_EMPTY);
         uint32_t resp = MBOX_READ;

@@ -10,5 +10,7 @@
 #define MBOX_EMPTY      (1u << 30)
 #define MBOX_CHANNEL_PM 8
 
+#define MBOX_TAG_SET_CLOCK_RATE 0x38002
+
 int mbox_call(volatile uint32_t *buf);
 #endif
