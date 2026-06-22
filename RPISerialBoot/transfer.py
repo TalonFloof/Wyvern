@@ -13,7 +13,7 @@ import zlib
 READY_BYTE = 0x03
 ACK         = 0x06
 NAK         = 0x15
-BAUD = 115200
+BAUD = 1500000
 PORT = '/dev/ttyACM0'
 CHUNK_SIZE = 512
 MAX_RETRIES = 3

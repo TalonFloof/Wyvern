@@ -33,8 +33,10 @@ void uart_init(void) {
 
     // Set baud rate to 115200
     // PL011 baud rate divisor = UART clock / (16 * baud rate)
-    *UART0_IBRD = 26;
-    *UART0_FBRD = 3;
+    //*UART0_IBRD = 26;
+    //*UART0_FBRD = 3;
+    *UART0_IBRD = 2;
+    *UART0_FBRD = 0;
 
     // 8 bit, no parity, 1 stop bit, enable FIFO
     *UART0_LCRH = (1 << 4) | (1 << 5) | (1 << 6);
