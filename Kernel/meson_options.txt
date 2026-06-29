@@ -1,6 +1,0 @@
-option('platform',
-  type: 'combo',
-  choices: ['QEMU', 'VisionFive2', 'Broadcom2837', 'NewWorldPC'],
-  value: 'QEMU',
-  description: 'Target hardware platform (must be valid for the selected cross file)'
-)
